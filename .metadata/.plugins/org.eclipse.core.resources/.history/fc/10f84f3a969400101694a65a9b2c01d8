@@ -1,0 +1,153 @@
+/* ###################################################################
+**     Filename    : main.c
+**     Project     : gps
+**     Processor   : MKL25Z128VLK4
+**     Version     : Driver 01.01
+**     Compiler    : GNU C Compiler
+**     Date/Time   : 2025-09-18, 10:11, # CodeGen: 0
+**     Abstract    :
+**         Main module.
+**         This module contains user's application code.
+**     Settings    :
+**     Contents    :
+**         No public methods
+**
+** ###################################################################*/
+/*!
+** @file main.c
+** @version 01.01
+** @brief
+**         Main module.
+**         This module contains user's application code.
+*/         
+/*!
+**  @addtogroup main_module main module documentation
+**  @{
+*/         
+/* MODULE main */
+
+
+/* Including needed modules to compile this module/procedure */
+#include "Cpu.h"
+#include "Events.h"
+#include "clockMan1.h"
+#include "pin_init.h"
+#include "osa1.h"
+#include "DbgCs1.h"
+#if CPU_INIT_CONFIG
+  #include "Init_Config.h"
+#endif
+/* User includes (#include below this line is not maintained by Processor Expert) */
+/* User includes (#include below this line is not maintained by Processor Expert) */
+#include "MKL25Z4.h"     // registradores da KL25Z
+#include <stdint.h>
+
+/* ========= UART0 em PTA2(TX)/PTA1(RX) + SysTick para delay =========== */
+
+/* Inicializa UART0 em 'baud' (ex.: 115200). KL25Z usa divisor inteiro (BDH/BDL). */
+static void UART0_Init(uint32_t baud)
+{
+    uint32_t uartclk = SystemCoreClock;                 // clock base (tipicamente 48 MHz)
+    uint16_t sbr     = (uint16_t)(uartclk / (baud * 16u));
+    if (sbr == 0) sbr = 1;
+
+    // 1) Clocks dos módulos
+    SIM->SCGC4 |= SIM_SCGC4_UART0_MASK;                 // habilita clock da UART0
+    SIM->SCGC5 |= SIM_SCGC5_PORTA_MASK;                 // habilita clock do PORTA (pinos)
+
+    // 2) Multiplexa pinos: PTA1=UART0_RX (ALT2), PTA2=UART0_TX (ALT2)
+    PORTA->PCR[1] = PORT_PCR_MUX(2);
+    PORTA->PCR[2] = PORT_PCR_MUX(2);
+
+    // 3) Seleciona fonte de clock para UART0: MCGFLLCLK/PLL/2 (valor '1')
+    SIM->SOPT2 = (SIM->SOPT2 & ~SIM_SOPT2_UART0SRC_MASK) | SIM_SOPT2_UART0SRC(1);
+
+    // 4) Garante que RX/TX são roteados para os pinos (não para outras fontes internas)
+    SIM->SOPT5 = (SIM->SOPT5 &
+                 ~(SIM_SOPT5_UART0RXSRC_MASK | SIM_SOPT5_UART0TXSRC_MASK))
+               |  SIM_SOPT5_UART0RXSRC(0)     // 0 = UART0_RX pin
+               |  SIM_SOPT5_UART0TXSRC(0);    // 0 = UART0_TX pin
+
+    // 5) Configura baud e habilita UART
+    UART0->C2 &= ~(UART0_C2_TE_MASK | UART0_C2_RE_MASK); // desabilita TX/RX p/ configurar
+    UART0->BDH = (uint8_t)((sbr >> 8) & UART0_BDH_SBR_MASK);
+    UART0->BDL = (uint8_t)(sbr & 0xFFu);
+    UART0->C1  = 0x00;                                   // 8N1, sem paridade
+    UART0->C4  = 0x00;                                   // KL25Z não tem BRFA -> deixe 0
+    UART0->C2  = UART0_C2_TE_MASK | UART0_C2_RE_MASK;    // habilita TX e RX
+}
+
+/* Envia 1 caractere (bloqueante) */
+static void UART0_Putc(char c)
+{
+    while (!(UART0->S1 & UART0_S1_TDRE_MASK)) { /* espera TX vazio */ }
+    UART0->D = (uint8_t)c;
+}
+
+/* Envia string; converte '\n' para CR+LF (compatível com terminais) */
+static void UART0_Puts(const char *s)
+{
+    while (*s) {
+        if (*s == '\n') UART0_Putc('\r');
+        UART0_Putc(*s++);
+    }
+}
+
+
+
+
+
+/*lint -save  -e970 Disable MISRA rule (6.3) checking. */
+int main(void)
+/*lint -restore Enable MISRA rule (6.3) checking. */
+{
+  /* Write your local variable definition here */
+
+  /*** Processor Expert internal initialization. DON'T REMOVE THIS CODE!!! ***/
+  PE_low_level_init();
+  /*** End of Processor Expert internal initialization.                    ***/
+  OSA_Init();         // inicializa o tick do OSA
+
+  UART0_Init(115200u);  // sua UART init
+
+  for (;;) {
+      UART0_Puts("teste\r\n");
+      (void)OSA_TimeDelay(1000);   // 1000 ms (em vez do seu delay_ms)
+  }
+
+  /* Inicializa SysTick (1 kHz) e UART0 a 115200 baud */
+  SysTick_Config(SystemCoreClock / 1000u);
+  UART0_Init(115200u);
+
+  /* Imprime "teste" a cada 1 segundo, para você ver no RealTerm sem perder a mensagem */
+  for (;;)
+  {
+    UART0_Puts("teste\r\n");
+    delay_ms(1000);
+  }
+  /* Write your code here */
+  /* For example: for(;;) { } */
+
+  /*** Don't write any code pass this line, or it will be deleted during code generation. ***/
+  /*** RTOS startup code. Macro PEX_RTOS_START is defined by the RTOS component. DON'T MODIFY THIS CODE!!! ***/
+  #ifdef PEX_RTOS_START
+    PEX_RTOS_START();                  /* Startup of the selected RTOS. Macro is defined by the RTOS component. */
+  #endif
+  /*** End of RTOS startup code.  ***/
+  /*** Processor Expert end of main routine. DON'T MODIFY THIS CODE!!! ***/
+  for(;;){}
+  /*** Processor Expert end of main routine. DON'T WRITE CODE BELOW!!! ***/
+} /*** End of main routine. DO NOT MODIFY THIS TEXT!!! ***/
+
+/* END main */
+/*!
+** @}
+*/
+/*
+** ###################################################################
+**
+**     This file was created by Processor Expert 10.5 [05.21]
+**     for the Freescale Kinetis series of microcontrollers.
+**
+** ###################################################################
+*/
